@@ -1,0 +1,198 @@
+Replit Extension Platform
+
+Replit supports Extensions (plugins) that run inside the IDE. Extensions are built as special Replit Apps (usually using React or vanilla JS) with a manifest (extension.json) declaring tools or file handlers. A tool appears as a custom tab/pane in the Replit workspace ￼. The Extensions API (via @replit/extensions or @replit/extensions-react) provides hooks for filesystem, commands, storage, and UI integration. For example, you can import Replit hooks and APIs as shown in the Snippet Manager example:
+
+import { useReplit, useReplitEffect } from "@replit/extensions-react";
+import { replDb } from "@replit/extensions";
+import React, { useState } from "react";
+
+This React extension uses useReplit() to handshake with the IDE and replDb to store data ￼. The Replit Extension manifest (public/extension.json) defines the extension name, description, and tools. For instance, in a “Snippet Manager” tool, the manifest might include:
+
+{
+  "name": "Snippet Manager",
+  "description": "Access code snippets in the Replit workspace",
+  "version": "0",
+  "tools": [
+    { "handler": "/", "name": "Snippet Manager" }
+  ],
+  "tags": ["snippet", "tool"]
+}
+
+This makes the extension appear as a sidebar tab ￼ ￼. Replit provides templates (React and vanilla JS) to bootstrap an extension ￼. The Replit Extensions API supports custom commands (via commands.add), file handlers (for custom editors), background scripts, and UI themes ￼. For example, a CLI command can be registered like:
+
+await replit.commands.add({
+  id: "notion-sync",
+  contributions: [replit.ContributionType.CommandBar],
+  command: {
+    label: "Notion Sync",
+    description: "Sync with Notion",
+    commands: async () => { /* return subcommands or actions */ }
+  }
+});
+
+(see the JavaScript Commands example ￼).
+
+Notion APIs and SDKs
+
+Notion offers a REST API with an official JavaScript client (@notionhq/client) that can be used from Node/React. Developers create either an Internal or Public integration ￼. For quick setup, an internal integration (workspace-specific token) is easiest: create an integration in Notion, copy its secret token, and share relevant pages/databases with it ￼. Store this token securely (e.g. Replit’s Secrets manager) and pass it to the Notion client. For example, in a Node script you would init the client as:
+
+const { Client } = require("@notionhq/client");
+const notion = new Client({ auth: process.env.NOTION_TOKEN });
+
+￼ (set your NOTION_TOKEN from a secure config). Once initialized, the SDK supports all Notion endpoints. You can create or update pages, query databases, and manipulate blocks (including code blocks). For example, to query a database of notes or snippets:
+
+const results = await notion.databases.query({
+  database_id: "YOUR_DATABASE_ID",
+  filter: { /* ... */ }
+});
+
+Notion’s API reference details using pages.create, pages.update, databases.query, etc. For instance, adding a row to a database involves:
+
+await notion.pages.create({
+  parent: { database_id: "DB_ID" },
+  properties: {
+    Title: { type: 'title', title: [{ type: 'text', text: { content: 'My Update' } }] },
+    Date:  { type: 'date',  date: { start: new Date().toISOString() } },
+    // other properties matching your DB schema
+  }
+});
+
+This example is adapted from Notion’s docs ￼ ￼. To insert a code snippet into a Notion page or database, you can use a code block. The Notion API accepts a block of "type": "code" with rich_text. For example:
+
+await notion.blocks.children.append({
+  block_id: "PARENT_PAGE_ID",
+  children: [
+    {
+      type: "code",
+      code: {
+        rich_text: [{ type: "text", text: { content: snippetContent } }],
+        language: "javascript",
+      }
+    }
+  ]
+});
+
+The block JSON looks like this example from Notion’s API docs ￼ ￼:
+
+{
+  "type": "code",
+  "code": {
+    "caption": [],
+    "rich_text": [ { "type": "text", "text": { "content": "const a = 3" } } ],
+    "language": "javascript"
+  }
+}
+
+In summary, use the Notion SDK or REST calls in your extension to push/pull content. Key endpoints include Create Page, Update Page, Create Database Entry, and Query Database ￼ ￼. The Notion API docs and SDK examples (e.g. on GitHub ￼ ￼) provide complete reference.
+
+Authentication
+
+The extension will need to authenticate to Notion. The simplest approach is Internal Integration: instruct users to create a Notion integration in their workspace, copy its secret token, and grant it access to the pages/databases to sync. This token is then provided to your extension (e.g. entered in a settings UI or stored via Replit’s Secrets). The token must be kept confidential (as Notion warns) ￼. For example, you might read process.env.NOTION_TOKEN in your extension code (Replit apps can use the Secrets tool) or store it in replDb.
+
+If multi-user support is needed, a Public (OAuth) integration can be used, but that requires implementing an OAuth flow. Replit extensions run in the browser/IDE context, so managing OAuth redirects can be complex. For most open-source use-cases, per-user integration tokens are easiest. The extension itself runs under the logged-in Replit user, and you can use the Replit Me API if you need the user’s Replit identity (though not required for Notion access). Replit also offers an Auth API to manage user login into your extension ￼, but for a simple sync tool it may suffice to link accounts manually.
+
+Syncing Code Snippets
+
+To sync code snippets between Replit and Notion, you can treat Notion as a snippet repository. In Replit, you could build a UI tool (e.g. “Snippet Manager” pane) that lists available snippets from Notion and allows adding new ones. On the Replit side, use the Filesystem API or Editor API to read code content (for example, get the selected text or file contents). Then call the Notion API to create or update a page/block. E.g., to push a snippet to Notion:
+
+// In extension code, after obtaining 'snippetContent' from editor...
+await notion.pages.create({
+  parent: { page_id: NOTION_PARENT_PAGE },      // an existing page or database
+  properties: { Title: { /* title props */ } }, // if creating a child page
+  children: [{
+    type: "code",
+    code: { rich_text: [{type: "text", text: {content: snippetContent}}], language: "javascript" }
+  }]
+});
+
+To pull snippets from Notion, you might query a Notion database of snippets or search for a page. Then use Replit’s Filesystem API to create or update a file with the retrieved code. For example, after fetching a snippet text, you could do:
+
+import { files } from "@replit/extensions";
+await files.writeFile({ path: `snippets/${title}.js`, content: snippetContent });
+
+The example “Snippet Manager” extension shows how to manage code snippets in Replit using replDb, which you could adapt to call Notion instead ￼. Key Replit APIs: files.readFile/writeFile, editor.getSelection, and replDb (or session storage) to track mappings.
+
+Logging Project Progress
+
+To log progress from Replit to Notion, a good approach is to use a Notion Database as a changelog. In Notion, set up a database (e.g. “Project Updates”) with properties like Title, Status, Date, etc. In your extension, invoke the Notion API to create a new page in that database on demand. For example:
+
+await notion.pages.create({
+  parent: { database_id: "NOTION_DB_ID" },
+  properties: {
+    "Title": { type: "title", title: [{ type: "text", text: { content: "Completed Task X" } }] },
+    "Date":  { type: "date",  date: { start: new Date().toISOString() } },
+    "Status": { type: "select", select: { name: "Done" } }
+  }
+});
+
+This mirrors Notion’s sample for creating a database entry ￼ ￼. You could trigger this from a Replit command or UI button when a milestone is reached. The extension could also query the database (via notion.databases.query) to display logs or allow editing previous entries.
+
+If desired, you can also link the Replit Version control or commit history (Replit has Git) by listening to changes and auto-logging. Replit’s Session API and ReplDB (or webhooks, if set up) could track run state and trigger updates. For example, on a successful run, append a progress note to Notion. Use notion.pages.update to edit existing pages (properties or content) as needed. In all cases, ensure the integration’s pages or DB are shared with the Notion integration beforehand ￼.
+
+Executing Notion Commands from Replit
+
+Once authorized, your extension can perform essentially any Notion API call from within Replit. Typical commands include:
+   •   Create/Update Page: e.g. notion.pages.update({ page_id, properties: { ... } }).
+   •   Query Database: e.g. notion.databases.query({ database_id, filter: { ... } }) to list items.
+   •   Append Blocks: e.g. notion.blocks.children.append to modify page content (text, checklists, etc.).
+   •   Create Database: (advanced) notion.databases.create to set up new Notion databases from Replit.
+   •   Search: notion.search({ query: "keyword", filter: { property: 'object', value: 'page' } }).
+
+Each operation can be triggered via your extension’s UI or commands. For instance, a “Sync Now” button in the tool could call notion.databases.query to refresh a list of pages. Replit’s Commands API can offer quick shortcuts; e.g., typing “/notion-update” in the CLUI could run a function. The JavaScript Commands tutorial shows how to use replit.commands.add with sub-commands ￼. Use that to hook Notion operations into the command palette.
+
+Below is an example of creating a new Notion page from a Replit extension (JavaScript):
+
+const notion = new Client({ auth: process.env.NOTION_TOKEN });
+(async () => {
+  await notion.pages.create({
+    parent: { page_id: "PARENT_PAGE_ID" },
+    properties: {
+      Title: { type: 'title', title: [{ type: 'text', text: { content: 'New Page from Replit' } }] }
+    },
+    children: [
+      { type: 'paragraph', paragraph: { rich_text: [{type:'text', text: { content: 'Created via Replit Extension.'}}] } }
+    ]
+  });
+})();
+
+See Notion’s API reference for more details on each endpoint ￼ ￼.
+
+Example Projects and Templates
+
+There are existing examples and templates you can study:
+   •   Replit Extension Templates: Start with Replit’s [React Extension Template] or [JS Extension Template] (via Replit) ￼. These include setup for extension.json, building, and running.
+   •   Snippet Manager Tutorial: Replit’s “Snippet Manager” example shows a React extension storing snippets in ReplDB ￼. You could adapt it to sync with Notion instead of local DB.
+   •   Open-Source Extensions: Some community extensions demonstrate API use. For example, a ChatGPT extension on GitHub illustrates calling external APIs and accessing files ￼. Reviewing such repos (notion-sync extensions specifically may be rare) can guide your implementation.
+   •   Replit API Library: Replit’s official @replit/extensions packages (and monorepo) are open-source. They contain utility code and documentation for extension APIs.
+   •   Notion SDK Starter: Notion provides a [TypeScript starter template] and plenty of examples on their GitHub ￼ ￼ which, while not Replit-specific, are useful references for using the Notion SDK.
+
+No single off-the-shelf extension currently does exactly two-way Replit↔Notion syncing, so you’ll likely combine ideas. However, studying the above resources (e.g. [44] for UI/data patterns and Notion’s docs for API usage) will accelerate development.
+
+UI/UX Considerations
+
+In Replit, your extension’s interface should feel like a native tool pane. Use React (or vanilla JS) to build a simple UI: for example, a tab labeled “Notion Sync” with sections for Settings (enter Notion token/IDs), Snippets, and Progress Logs. Leverage Replit’s design tokens or CSS (via the Extensions Theme API) to match dark/light themes ￼. Provide buttons or command inputs for actions like “Sync Code to Notion” or “Fetch Notion Snippets”. Use the Messages API to give feedback – e.g., messages.showNotice("Snippet synced!") or messages.showError("Failed to update Notion") ￼ ￼.
+
+Since extensions are panels, keep UI concise: use lists to show available snippets or updates, and forms/dialogs for creating new entries. If you register command palette entries, users can trigger actions without leaving the keyboard ￼. For authentication, consider a secure input field (or instruct users to use Replit Secrets) to handle the Notion token. Also remind users (via UI text) to share the relevant Notion pages/databases with the integration (else API calls will 403) ￼.
+
+Overall, design the extension as an IDE tool: minimal friction, clear status messages, and easy navigation between Replit projects and Notion content. Testing in the Replit Devtools preview (see [22] “Preview your extension”) will help ensure the workflow feels integrated.
+
+Implementation Guidance
+	1.	Set Up: Fork a Replit Extension template (React or JS) ￼. Configure extension.json with your extension’s name and a single tool handler. Include needed scopes (e.g. filesystem, repldb) in the manifest.
+	2.	Authentication: In your extension UI, prompt the user for a Notion integration token or instruct them to set a secret. Store it via ReplDB or Replit Secrets. Initialize the Notion client (@notionhq/client) using that token.
+	3.	File Access: Use import { files, editor } from "@replit/extensions" to read/write code in the current workspace. For example, const content = await files.readFile({ path: currentPath }).
+	4.	Sync Code: Build a function that takes code text and calls Notion’s API. For example, notion.blocks.children.append to insert a code block into a Notion page. Allow syncing in both directions (e.g. fetch a Notion snippet and create/update a local file).
+	5.	Log Progress: Add UI controls (buttons, input fields) for logging. E.g., a form where the user enters an update message; on submit, call notion.pages.create to add a row to a Notion database (using a title property and timestamp).
+	6.	Commands: Optionally register replit.commands.add for quick actions. For example, a /notion-sync command could trigger the same functions as a button.
+	7.	Error Handling: Catch API errors and display via messages.showError. For example, if the Notion token is invalid or a page isn’t shared, show an error toast.
+	8.	Testing: Use Replit’s Extension Devtools to load your extension locally and test calls. You can mock or test with a real Notion workspace.
+
+Remember to cite documentation URLs and sample code. Key references include Replit’s Extensions docs ￼ ￼ ￼, Notion’s API docs ￼ ￼, and example repos.
+
+References
+   •   Replit Extensions docs – APIs (filesystem, commands, ReplDB, etc.) ￼.
+   •   Replit “Create your first Extension” and example guides ￼ ￼.
+   •   Notion API docs – Integration types and authorization ￼ ￼.
+   •   Notion JavaScript SDK (GitHub) ￼ and code examples ￼.
+   •   Notion Block object (code block example) ￼.
+   •   Replit Extensions CLI/Commands example ￼.
+   •   Replit Messages API (notifications) ￼ ￼.

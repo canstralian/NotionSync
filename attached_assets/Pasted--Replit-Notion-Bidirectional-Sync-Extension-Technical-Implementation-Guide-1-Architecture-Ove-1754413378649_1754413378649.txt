@@ -1,0 +1,1091 @@
+# Replit-Notion Bidirectional Sync Extension: Technical Implementation Guide
+
+## 1. Architecture Overview
+
+This comprehensive guide outlines the development of a robust Replit extension enabling seamless bidirectional data synchronization with Notion workspaces. The extension leverages modern web technologies and follows enterprise-grade architectural patterns.
+
+### System Architecture Components:
+
+- **Frontend Interface**: React-based configuration panel and status dashboard
+- **Backend Synchronization Engine**: Flask API with PostgreSQL persistence layer
+- **Authentication Layer**: OAuth 2.0 integration for both Replit and Notion APIs
+- **Data Processing Pipeline**: Real-time conflict resolution and transformation services
+
+### Core Technical Stack:
+
+```python
+# Technology Stack Configuration
+TECH_STACK = {
+    "backend": "Flask 3.0+",
+    "frontend": "React 18+",
+    "database": "PostgreSQL 15+",
+    "authentication": "OAuth 2.0",
+    "apis": ["Replit API", "Notion API v1"],
+    "deployment": "Replit Cloud Infrastructure"
+}
+```
+
+## 2. Extension Setup and Configuration
+
+### 2.1 Project Structure Implementation
+
+```
+replit-notion-sync/
+├── backend/
+│   ├── app.py                    # Flask application entry point
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── sync_models.py        # Database schema definitions
+│   │   └── api_models.py         # API response models
+│   ├── services/
+│   │   ├── notion_service.py     # Notion API integration
+│   │   ├── replit_service.py     # Replit API integration
+│   │   └── sync_service.py       # Bidirectional sync logic
+│   ├── utils/
+│   │   ├── auth_manager.py       # OAuth authentication handler
+│   │   └── data_transformer.py   # Data format conversion
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── SyncDashboard.jsx
+│   │   │   ├── ConfigPanel.jsx
+│   │   │   └── StatusMonitor.jsx
+│   │   ├── services/
+│   │   │   └── api.js
+│   │   └── App.jsx
+│   ├── package.json
+│   └── public/
+├── database/
+│   ├── migrations/
+│   └── schema.sql
+└── docs/
+    ├── api_documentation.md
+    └── deployment_guide.md
+```
+
+### 2.2 Database Schema Design
+
+```sql
+-- Advanced synchronization tracking schema
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE sync_configurations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id VARCHAR(255) NOT NULL,
+    replit_token_hash VARCHAR(512) NOT NULL,
+    notion_token_hash VARCHAR(512) NOT NULL,
+    sync_frequency INTEGER DEFAULT 300, -- seconds
+    last_sync_timestamp TIMESTAMP WITH TIME ZONE,
+    configuration_metadata JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE sync_mappings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    config_id UUID REFERENCES sync_configurations(id),
+    replit_resource_type VARCHAR(100) NOT NULL,
+    replit_resource_id VARCHAR(255) NOT NULL,
+    notion_database_id VARCHAR(255) NOT NULL,
+    notion_page_id VARCHAR(255),
+    mapping_rules JSONB NOT NULL,
+    sync_direction VARCHAR(20) CHECK (sync_direction IN ('bidirectional', 'replit_to_notion', 'notion_to_replit')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE sync_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    mapping_id UUID REFERENCES sync_mappings(id),
+    sync_operation VARCHAR(50) NOT NULL,
+    status VARCHAR(20) CHECK (status IN ('success', 'failure', 'partial')),
+    records_processed INTEGER DEFAULT 0,
+    error_details JSONB,
+    execution_duration_ms INTEGER,
+    timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Performance optimization indexes
+CREATE INDEX idx_sync_configs_user ON sync_configurations(user_id);
+CREATE INDEX idx_sync_mappings_config ON sync_mappings(config_id);
+CREATE INDEX idx_sync_logs_mapping_timestamp ON sync_logs(mapping_id, timestamp DESC);
+```
+
+## 3. API Integration Framework
+
+### 3.1 Notion API Service Implementation
+
+```python
+# services/notion_service.py
+from typing import Dict, List, Optional, Any
+import requests
+import logging
+from dataclasses import dataclass
+from datetime import datetime
+
+@dataclass
+class NotionPageData:
+    """Structured representation of Notion page data"""
+    page_id: str
+    title: str
+    properties: Dict[str, Any]
+    last_edited_time: datetime
+    created_time: datetime
+
+class NotionAPIService:
+    """Advanced Notion API integration with comprehensive error handling"""
+    
+    def __init__(self, auth_token: str):
+        self.auth_token = auth_token
+        self.base_url = "https://api.notion.com/v1"
+        self.headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Notion-Version": "2022-06-28",
+            "Content-Type": "application/json"
+        }
+        self.logger = logging.getLogger(__name__)
+    
+    async def query_database(self, database_id: str, 
+                           filter_conditions: Optional[Dict] = None,
+                           sort_criteria: Optional[List[Dict]] = None) -> List[NotionPageData]:
+        """
+        Execute advanced database queries with filtering and sorting capabilities
+        
+        Args:
+            database_id: Target Notion database identifier
+            filter_conditions: Complex filtering logic for data retrieval
+            sort_criteria: Multi-field sorting specifications
+            
+        Returns:
+            List of structured NotionPageData objects
+        """
+        query_payload = {}
+        
+        if filter_conditions:
+            query_payload["filter"] = filter_conditions
+        
+        if sort_criteria:
+            query_payload["sorts"] = sort_criteria
+            
+        try:
+            response = requests.post(
+                f"{self.base_url}/databases/{database_id}/query",
+                headers=self.headers,
+                json=query_payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            results = response.json().get("results", [])
+            return [self._transform_page_data(page) for page in results]
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Notion API query failed: {str(e)}")
+            raise NotionAPIException(f"Database query failed: {str(e)}")
+    
+    async def create_page(self, database_id: str, properties: Dict[str, Any]) -> NotionPageData:
+        """Create new page with comprehensive property validation"""
+        payload = {
+            "parent": {"database_id": database_id},
+            "properties": self._validate_properties(properties)
+        }
+        
+        try:
+            response = requests.post(
+                f"{self.base_url}/pages",
+                headers=self.headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            return self._transform_page_data(response.json())
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Page creation failed: {str(e)}")
+            raise NotionAPIException(f"Page creation failed: {str(e)}")
+    
+    async def update_page(self, page_id: str, properties: Dict[str, Any]) -> NotionPageData:
+        """Update existing page with conflict detection"""
+        payload = {
+            "properties": self._validate_properties(properties)
+        }
+        
+        try:
+            response = requests.patch(
+                f"{self.base_url}/pages/{page_id}",
+                headers=self.headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            return self._transform_page_data(response.json())
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Page update failed: {str(e)}")
+            raise NotionAPIException(f"Page update failed: {str(e)}")
+    
+    def _transform_page_data(self, raw_page: Dict) -> NotionPageData:
+        """Transform raw API response into structured data object"""
+        return NotionPageData(
+            page_id=raw_page["id"],
+            title=self._extract_title(raw_page["properties"]),
+            properties=raw_page["properties"],
+            last_edited_time=datetime.fromisoformat(raw_page["last_edited_time"].replace("Z", "+00:00")),
+            created_time=datetime.fromisoformat(raw_page["created_time"].replace("Z", "+00:00"))
+        )
+    
+    def _validate_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and transform properties according to Notion schema requirements"""
+        # Implementation of comprehensive property validation logic
+        validated_properties = {}
+        
+        for key, value in properties.items():
+            if isinstance(value, str):
+                validated_properties[key] = {
+                    "rich_text": [{"text": {"content": value}}]
+                }
+            elif isinstance(value, (int, float)):
+                validated_properties[key] = {"number": value}
+            elif isinstance(value, bool):
+                validated_properties[key] = {"checkbox": value}
+            # Additional type handling logic
+                
+        return validated_properties
+
+class NotionAPIException(Exception):
+    """Custom exception for Notion API operations"""
+    pass
+```
+
+### 3.2 Replit API Service Implementation
+
+```python
+# services/replit_service.py
+from typing import Dict, List, Optional, Any
+import requests
+import asyncio
+from dataclasses import dataclass
+
+@dataclass
+class ReplitProjectData:
+    """Structured representation of Replit project information"""
+    project_id: str
+    title: str
+    description: str
+    language: str
+    files: List[Dict[str, str]]
+    last_modified: str
+    is_public: bool
+
+class ReplitAPIService:
+    """Comprehensive Replit API integration service"""
+    
+    def __init__(self, auth_token: str):
+        self.auth_token = auth_token
+        self.base_url = "https://replit.com/graphql"
+        self.headers = {
+            "Authorization": f"Bearer {auth_token}",
+            "Content-Type": "application/json"
+        }
+        self.logger = logging.getLogger(__name__)
+    
+    async def get_user_projects(self, limit: int = 50) -> List[ReplitProjectData]:
+        """Retrieve comprehensive user project information"""
+        query = """
+        query GetUserProjects($limit: Int!) {
+            currentUser {
+                replsConnection(first: $limit) {
+                    edges {
+                        node {
+                            id
+                            title
+                            description
+                            language
+                            files {
+                                path
+                                content
+                            }
+                            timeUpdated
+                            isPublic
+                        }
+                    }
+                }
+            }
+        }
+        """
+        
+        variables = {"limit": limit}
+        
+        try:
+            response = await self._execute_graphql_query(query, variables)
+            edges = response.get("data", {}).get("currentUser", {}).get("replsConnection", {}).get("edges", [])
+            
+            return [self._transform_project_data(edge["node"]) for edge in edges]
+            
+        except Exception as e:
+            self.logger.error(f"Failed to retrieve user projects: {str(e)}")
+            raise ReplitAPIException(f"Project retrieval failed: {str(e)}")
+    
+    async def get_project_details(self, project_id: str) -> ReplitProjectData:
+        """Retrieve detailed information for specific project"""
+        query = """
+        query GetProjectDetails($projectId: String!) {
+            repl(id: $projectId) {
+                id
+                title
+                description
+                language
+                files {
+                    path
+                    content
+                }
+                timeUpdated
+                isPublic
+                owner {
+                    username
+                }
+            }
+        }
+        """
+        
+        variables = {"projectId": project_id}
+        
+        try:
+            response = await self._execute_graphql_query(query, variables)
+            project_data = response.get("data", {}).get("repl")
+            
+            if not project_data:
+                raise ReplitAPIException(f"Project {project_id} not found")
+                
+            return self._transform_project_data(project_data)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to retrieve project details: {str(e)}")
+            raise ReplitAPIException(f"Project detail retrieval failed: {str(e)}")
+    
+    async def _execute_graphql_query(self, query: str, variables: Dict) -> Dict:
+        """Execute GraphQL query with comprehensive error handling"""
+        payload = {
+            "query": query,
+            "variables": variables
+        }
+        
+        try:
+            response = requests.post(
+                self.base_url,
+                headers=self.headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            if "errors" in result:
+                raise ReplitAPIException(f"GraphQL errors: {result['errors']}")
+                
+            return result
+            
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"GraphQL request failed: {str(e)}")
+            raise ReplitAPIException(f"API request failed: {str(e)}")
+    
+    def _transform_project_data(self, raw_project: Dict) -> ReplitProjectData:
+        """Transform raw API response into structured project data"""
+        return ReplitProjectData(
+            project_id=raw_project["id"],
+            title=raw_project["title"],
+            description=raw_project.get("description", ""),
+            language=raw_project["language"],
+            files=raw_project.get("files", []),
+            last_modified=raw_project["timeUpdated"],
+            is_public=raw_project["isPublic"]
+        )
+
+class ReplitAPIException(Exception):
+    """Custom exception for Replit API operations"""
+    pass
+```
+
+## 4. Bidirectional Synchronization Engine
+
+### 4.1 Advanced Sync Service Implementation
+
+```python
+# services/sync_service.py
+from typing import Dict, List, Optional, Tuple, Any
+import asyncio
+import logging
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+from enum import Enum
+
+class SyncDirection(Enum):
+    BIDIRECTIONAL = "bidirectional"
+    REPLIT_TO_NOTION = "replit_to_notion"
+    NOTION_TO_REPLIT = "notion_to_replit"
+
+class ConflictResolutionStrategy(Enum):
+    LATEST_WINS = "latest_wins"
+    REPLIT_PRIORITY = "replit_priority"
+    NOTION_PRIORITY = "notion_priority"
+    MANUAL_RESOLUTION = "manual_resolution"
+
+@dataclass
+class SyncConflict:
+    """Represents a synchronization conflict requiring resolution"""
+    replit_item: Any
+    notion_item: Any
+    conflict_type: str
+    resolution_strategy: ConflictResolutionStrategy
+
+class BidirectionalSyncService:
+    """Advanced bidirectional synchronization engine with conflict resolution"""
+    
+    def __init__(self, notion_service: NotionAPIService, 
+                 replit_service: ReplitAPIService, 
+                 database_manager: Any):
+        self.notion_service = notion_service
+        self.replit_service = replit_service
+        self.database_manager = database_manager
+        self.logger = logging.getLogger(__name__)
+    
+    async def execute_sync_operation(self, mapping_id: str) -> Dict[str, Any]:
+        """
+        Execute comprehensive bidirectional synchronization operation
+        
+        Args:
+            mapping_id: Identifier for specific sync mapping configuration
+            
+        Returns:
+            Detailed synchronization results and statistics
+        """
+        sync_start_time = datetime.utcnow()
+        sync_results = {
+            "mapping_id": mapping_id,
+            "status": "in_progress",
+            "records_processed": 0,
+            "conflicts_detected": 0,
+            "errors": [],
+            "execution_time_ms": 0
+        }
+        
+        try:
+            # Retrieve sync mapping configuration
+            mapping_config = await self.database_manager.get_sync_mapping(mapping_id)
+            
+            if not mapping_config:
+                raise SyncException(f"Sync mapping {mapping_id} not found")
+            
+            # Execute synchronization based on direction
+            if mapping_config.sync_direction == SyncDirection.BIDIRECTIONAL:
+                sync_results.update(await self._execute_bidirectional_sync(mapping_config))
+            elif mapping_config.sync_direction == SyncDirection.REPLIT_TO_NOTION:
+                sync_results.update(await self._execute_unidirectional_sync(mapping_config, "replit_to_notion"))
+            elif mapping_config.sync_direction == SyncDirection.NOTION_TO_REPLIT:
+                sync_results.update(await self._execute_unidirectional_sync(mapping_config, "notion_to_replit"))
+            
+            sync_results["status"] = "completed"
+            
+        except Exception as e:
+            self.logger.error(f"Sync operation failed: {str(e)}")
+            sync_results["status"] = "failed"
+            sync_results["errors"].append(str(e))
+        
+        finally:
+            execution_time = (datetime.utcnow() - sync_start_time).total_seconds() * 1000
+            sync_results["execution_time_ms"] = int(execution_time)
+            
+            # Log sync operation results
+            await self.database_manager.log_sync_operation(mapping_id, sync_results)
+        
+        return sync_results
+    
+    async def _execute_bidirectional_sync(self, mapping_config: Any) -> Dict[str, Any]:
+        """Execute bidirectional synchronization with conflict detection and resolution"""
+        results = {
+            "records_processed": 0,
+            "conflicts_detected": 0,
+            "conflicts_resolved": 0,
+            "sync_operations": []
+        }
+        
+        # Retrieve data from both sources
+        replit_data = await self.replit_service.get_project_details(mapping_config.replit_resource_id)
+        notion_data = await self.notion_service.query_database(mapping_config.notion_database_id)
+        
+        # Detect conflicts and changes
+        conflicts, replit_changes, notion_changes = await self._analyze_data_changes(
+            replit_data, notion_data, mapping_config
+        )
+        
+        results["conflicts_detected"] = len(conflicts)
+        
+        # Resolve conflicts
+        resolved_conflicts = await self._resolve_conflicts(conflicts, mapping_config.conflict_resolution_strategy)
+        results["conflicts_resolved"] = len(resolved_conflicts)
+        
+        # Apply changes from Replit to Notion
+        for change in replit_changes:
+            try:
+                await self._apply_replit_to_notion_change(change, mapping_config)
+                results["records_processed"] += 1
+                results["sync_operations"].append({
+                    "operation": "replit_to_notion",
+                    "record_id": change.get("id"),
+                    "status": "success"
+                })
+            except Exception as e:
+                results["sync_operations"].append({
+                    "operation": "replit_to_notion",
+                    "record_id": change.get("id"),
+                    "status": "failed",
+                    "error": str(e)
+                })
+        
+        # Apply changes from Notion to Replit
+        for change in notion_changes:
+            try:
+                await self._apply_notion_to_replit_change(change, mapping_config)
+                results["records_processed"] += 1
+                results["sync_operations"].append({
+                    "operation": "notion_to_replit",
+                    "record_id": change.page_id,
+                    "status": "success"
+                })
+            except Exception as e:
+                results["sync_operations"].append({
+                    "operation": "notion_to_replit",
+                    "record_id": change.page_id,
+                    "status": "failed",
+                    "error": str(e)
+                })
+        
+        return results
+    
+    async def _analyze_data_changes(self, replit_data: Any, notion_data: List[Any], 
+                                  mapping_config: Any) -> Tuple[List[SyncConflict], List[Any], List[Any]]:
+        """Analyze data changes and detect synchronization conflicts"""
+        conflicts = []
+        replit_changes = []
+        notion_changes = []
+        
+        # Implementation of comprehensive change detection algorithm
+        # This would include timestamp comparison, content hashing, and conflict identification
+        
+        return conflicts, replit_changes, notion_changes
+    
+    async def _resolve_conflicts(self, conflicts: List[SyncConflict], 
+                               strategy: ConflictResolutionStrategy) -> List[Any]:
+        """Resolve synchronization conflicts based on specified strategy"""
+        resolved_conflicts = []
+        
+        for conflict in conflicts:
+            if strategy == ConflictResolutionStrategy.LATEST_WINS:
+                resolved = await self._resolve_latest_wins(conflict)
+            elif strategy == ConflictResolutionStrategy.REPLIT_PRIORITY:
+                resolved = await self._resolve_replit_priority(conflict)
+            elif strategy == ConflictResolutionStrategy.NOTION_PRIORITY:
+                resolved = await self._resolve_notion_priority(conflict)
+            else:
+                # Queue for manual resolution
+                await self.database_manager.queue_manual_conflict_resolution(conflict)
+                continue
+            
+            resolved_conflicts.append(resolved)
+        
+        return resolved_conflicts
+
+class SyncException(Exception):
+    """Custom exception for synchronization operations"""
+    pass
+```
+
+## 5. React Frontend Implementation
+
+### 5.1 Sync Dashboard Component
+
+```jsx
+// components/SyncDashboard.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2, RefreshCw, Settings, AlertTriangle } from 'lucide-react';
+
+const SyncDashboard = () => {
+  const [syncConfigurations, setSyncConfigurations] = useState([]);
+  const [syncLogs, setSyncLogs] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeSyncs, setActiveSyncs] = useState(new Set());
+
+  /**
+   * Advanced sync configuration management with real-time status updates
+   */
+  const fetchSyncConfigurations = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/sync/configurations', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const configurations = await response.json();
+      setSyncConfigurations(configurations);
+    } catch (error) {
+      console.error('Failed to fetch sync configurations:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  /**
+   * Execute manual synchronization with comprehensive error handling
+   */
+  const executeSyncOperation = async (configurationId) => {
+    setActiveSyncs(prev => new Set([...prev, configurationId]));
+
+    try {
+      const response = await fetch(`/api/sync/execute/${configurationId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Sync execution failed: ${response.status}`);
+      }
+
+      const syncResult = await response.json();
+      
+      // Update sync logs with real-time results
+      setSyncLogs(prevLogs => [syncResult, ...prevLogs.slice(0, 49)]);
+      
+      // Refresh configurations to update last sync timestamps
+      await fetchSyncConfigurations();
+
+    } catch (error) {
+      console.error('Sync execution failed:', error);
+    } finally {
+      setActiveSyncs(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(configurationId);
+        return newSet;
+      });
+    }
+  };
+
+  /**
+   * Real-time sync status monitoring with WebSocket integration
+   */
+  useEffect(() => {
+    fetchSyncConfigurations();
+
+    // Establish WebSocket connection for real-time updates
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/sync-status`;
+    const websocket = new WebSocket(wsUrl);
+
+    websocket.onmessage = (event) => {
+      const update = JSON.parse(event.data);
+      
+      if (update.type === 'sync_completed') {
+        setSyncLogs(prevLogs => [update.data, ...prevLogs.slice(0, 49)]);
+        fetchSyncConfigurations();
+      }
+    };
+
+    return () => {
+      websocket.close();
+    };
+  }, [fetchSyncConfigurations]);
+
+  const getSyncStatusBadge = (lastSyncTimestamp, status) => {
+    if (!lastSyncTimestamp) {
+      return <Badge variant="secondary">Never Synced</Badge>;
+    }
+
+    const timeDiff = Date.now() - new Date(lastSyncTimestamp).getTime();
+    const hoursDiff = timeDiff / (1000 * 60 * 60);
+
+    if (status === 'success' && hoursDiff < 1) {
+      return <Badge variant="success">Recently Synced</Badge>;
+    } else if (status === 'failure') {
+      return <Badge variant="destructive">Sync Failed</Badge>;
+    } else if (hoursDiff > 24) {
+      return <Badge variant="warning">Sync Overdue</Badge>;
+    }
+
+    return <Badge variant="secondary">Synced</Badge>;
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Loading sync configurations...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Replit-Notion Sync Dashboard</h1>
+        <Button onClick={fetchSyncConfigurations} variant="outline">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Sync Configurations Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {syncConfigurations.map((config) => (
+          <Card key={config.id} className="relative">
+            <CardHeader>
+              <CardTitle className="flex justify-between items-center">
+                <span className="truncate">{config.replit_resource_type}</span>
+                {getSyncStatusBadge(config.last_sync_timestamp, config.last_sync_status)}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="text-sm text-gray-600">
+                  <p><strong>Direction:</strong> {config.sync_direction}</p>
+                  <p><strong>Frequency:</strong> {config.sync_frequency}s</p>
+                  <p><strong>Last Sync:</strong> {
+                    config.last_sync_timestamp 
+                      ? new Date(config.last_sync_timestamp).toLocaleString()
+                      : 'Never'
+                  }</p>
+                </div>
+                
+                <div className="flex space-x-2">
+                  <Button
+                    onClick={() => executeSyncOperation(config.id)}
+                    disabled={activeSyncs.has(config.id)}
+                    className="flex-1"
+                  >
+                    {activeSyncs.has(config.id) ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Sync Now
+                  </Button>
+                  
+                  <Button variant="outline" size="icon">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Recent Sync Logs */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Sync Operations</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {syncLogs.length === 0 ? (
+            <p className="text-gray-500">No recent sync operations</p>
+          ) : (
+            <div className="space-y-2">
+              {syncLogs.slice(0, 10).map((log, index) => (
+                <div key={index} className="flex justify-between items-center p-3 border rounded-lg">
+                  <div>
+                    <p className="font-medium">{log.mapping_id}</p>
+                    <p className="text-sm text-gray-600">
+                      {log.records_processed} records processed in {log.execution_time_ms}ms
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {log.conflicts_detected > 0 && (
+                      <Badge variant="warning">
+                        <AlertTriangle className="h-3 w-3 mr-1" />
+                        {log.conflicts_detected} conflicts
+                      </Badge>
+                    )}
+                    <Badge variant={log.status === 'completed' ? 'success' : 'destructive'}>
+                      {log.status}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default SyncDashboard;
+```
+
+## 6. Deployment and Configuration
+
+### 6.1 Replit Deployment Configuration
+
+```python
+# app.py - Flask application entry point
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
+import os
+import logging
+
+# Configure comprehensive logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+def create_application():
+    """Application factory with comprehensive configuration"""
+    app = Flask(__name__)
+    
+    # Production-grade configuration
+    app.config.update(
+        SECRET_KEY=os.environ.get('SECRET_KEY', 'development-key-change-in-production'),
+        SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL', 'postgresql://user:pass@localhost/syncdb'),
+        SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        SQLALCHEMY_ENGINE_OPTIONS={
+            'pool_size': 10,
+            'pool_recycle': 300,
+            'pool_pre_ping': True
+        },
+        JWT_SECRET_KEY=os.environ.get('JWT_SECRET_KEY', 'jwt-secret-change-in-production'),
+        NOTION_CLIENT_ID=os.environ.get('NOTION_CLIENT_ID'),
+        NOTION_CLIENT_SECRET=os.environ.get('NOTION_CLIENT_SECRET'),
+        REPLIT_CLIENT_ID=os.environ.get('REPLIT_CLIENT_ID'),
+        REPLIT_CLIENT_SECRET=os.environ.get('REPLIT_CLIENT_SECRET')
+    )
+    
+    # Initialize extensions
+    CORS(app)
+    db.init_app(app)
+    
+    # Register blueprints
+    from routes.auth_routes import auth_bp
+    from routes.sync_routes import sync_bp
+    from routes.config_routes import config_bp
+    
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
+    app.register_blueprint(sync_bp, url_prefix='/api/sync')
+    app.register_blueprint(config_bp, url_prefix='/api/config')
+    
+    return app
+
+if __name__ == '__main__':
+    app = create_application()
+    
+    # Development server configuration
+    app.run(
+        host='0.0.0.0',
+        port=int(os.environ.get('PORT', 5000)),
+        debug=os.environ.get('FLASK_ENV') == 'development'
+    )
+```
+
+### 6.2 Environment Configuration
+
+```bash
+# .env - Environment variables configuration
+# Database Configuration
+DATABASE_URL=postgresql://username:password@host:port/database_name
+REDIS_URL=redis://localhost:6379/0
+
+# API Keys and Secrets
+SECRET_KEY=your-flask-secret-key-here
+JWT_SECRET_KEY=your-jwt-secret-key-here
+
+# Notion API Configuration
+NOTION_CLIENT_ID=your-notion-client-id
+NOTION_CLIENT_SECRET=your-notion-client-secret
+NOTION_REDIRECT_URI=https://your-replit-app.com/auth/notion/callback
+
+# Replit API Configuration
+REPLIT_CLIENT_ID=your-replit-client-id
+REPLIT_CLIENT_SECRET=your-replit-client-secret
+REPLIT_REDIRECT_URI=https://your-replit-app.com/auth/replit/callback
+
+# Application Configuration
+FLASK_ENV=production
+LOG_LEVEL=INFO
+SYNC_WORKER_CONCURRENCY=4
+MAX_SYNC_OPERATIONS_PER_MINUTE=60
+```
+
+## 7. Security and Performance Optimization
+
+### 7.1 Authentication and Authorization Framework
+
+```python
+# utils/auth_manager.py
+from functools import wraps
+from flask import request, jsonify, current_app
+import jwt
+import requests
+from datetime import datetime, timedelta
+
+class AuthenticationManager:
+    """Comprehensive authentication and authorization management"""
+    
+    @staticmethod
+    def generate_jwt_token(user_id: str, expires_hours: int = 24) -> str:
+        """Generate secure JWT token with expiration"""
+        payload = {
+            'user_id': user_id,
+            'exp': datetime.utcnow() + timedelta(hours=expires_hours),
+            'iat': datetime.utcnow()
+        }
+        
+        return jwt.encode(
+            payload,
+            current_app.config['JWT_SECRET_KEY'],
+            algorithm='HS256'
+        )
+    
+    @staticmethod
+    def verify_jwt_token(token: str) -> Optional[Dict]:
+        """Verify and decode JWT token"""
+        try:
+            payload = jwt.decode(
+                token,
+                current_app.config['JWT_SECRET_KEY'],
+                algorithms=['HS256']
+            )
+            return payload
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+    
+    @staticmethod
+    def require_authentication(f):
+        """Decorator for route authentication requirement"""
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            auth_header = request.headers.get('Authorization')
+            
+            if not auth_header or not auth_header.startswith('Bearer '):
+                return jsonify({'error': 'Authentication required'}), 401
+            
+            token = auth_header.split(' ')[1]
+            payload = AuthenticationManager.verify_jwt_token(token)
+            
+            if not payload:
+                return jsonify({'error': 'Invalid or expired token'}), 401
+            
+            request.user_id = payload['user_id']
+            return f(*args, **kwargs)
+        
+        return decorated_function
+```
+
+### 7.2 Performance Monitoring and Caching
+
+```python
+# utils/performance_monitor.py
+import time
+import redis
+from functools import wraps
+from flask import current_app
+import logging
+
+class PerformanceMonitor:
+    """Advanced performance monitoring and caching system"""
+    
+    def __init__(self):
+        self.redis_client = redis.from_url(current_app.config.get('REDIS_URL', 'redis://localhost:6379/0'))
+        self.logger = logging.getLogger(__name__)
+    
+    def cache_result(self, key: str, ttl_seconds: int = 300):
+        """Decorator for result caching with configurable TTL"""
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                cache_key = f"cache:{key}:{hash(str(args) + str(kwargs))}"
+                
+                # Attempt to retrieve from cache
+                try:
+                    cached_result = self.redis_client.get(cache_key)
+                    if cached_result:
+                        self.logger.info(f"Cache hit for key: {cache_key}")
+                        return json.loads(cached_result)
+                except Exception as e:
+                    self.logger.warning(f"Cache retrieval failed: {str(e)}")
+                
+                # Execute function and cache result
+                start_time = time.time()
+                result = await func(*args, **kwargs)
+                execution_time = time.time() - start_time
+                
+                try:
+                    self.redis_client.setex(
+                        cache_key,
+                        ttl_seconds,
+                        json.dumps(result, default=str)
+                    )
+                    self.logger.info(f"Result cached for key: {cache_key}")
+                except Exception as e:
+                    self.logger.warning(f"Cache storage failed: {str(e)}")
+                
+                # Log performance metrics
+                self.logger.info(f"Function {func.__name__} executed in {execution_time:.3f}s")
+                
+                return result
+            
+            return wrapper
+        return decorator
+    
+    def monitor_performance(self, operation_name: str):
+        """Decorator for comprehensive performance monitoring"""
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                start_time = time.time()
+                memory_before = self._get_memory_usage()
+                
+                try:
+                    result = await func(*args, **kwargs)
+                    status = "success"
+                except Exception as e:
+                    status = "error"
+                    raise
+                finally:
+                    execution_time = time.time() - start_time
+                    memory_after = self._get_memory_usage()
+                    memory_diff = memory_after - memory_before
+                    
+                    # Record performance metrics
+                    self._record_metrics(operation_name, {
+                        'execution_time': execution_time,
+                        'memory_usage_mb': memory_diff,
+                        'status': status,
+                        'timestamp': datetime.utcnow().isoformat()
+                    })
+                
+                return result
+            
+            return wrapper
+        return decorator
+```
+
+This comprehensive technical implementation guide provides a robust foundation for building a production-ready Replit-Notion bidirectional sync extension. The architecture emphasizes scalability, security, and maintainability while adhering to industry best practices and your specified technical preferences.​​​​​​​​​​​​​​​​
