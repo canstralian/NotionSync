@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Database, FolderSync, Clock, Server, TrendingUp, CheckCircle, AlertTriangle, ArrowDown } from "lucide-react";
+import { Database, RefreshCw, Clock, Server, TrendingUp, CheckCircle, AlertTriangle, ArrowDown } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 interface Stats {
@@ -49,7 +49,7 @@ export default function SyncStatusDashboard() {
       subtitleColor: "text-success"
     },
     {
-      icon: FolderSync,
+      icon: RefreshCw,
       title: "Last FolderSync",
       value: stats?.lastSync || "Never",
       subtitle: "Successful",

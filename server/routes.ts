@@ -2,8 +2,12 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertNotionDatabaseSchema, insertSyncOperationSchema, insertDataChangeSchema } from "@shared/schema";
+import { registerAuthRoutes } from "./auth-routes";
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Register authentication routes
+  registerAuthRoutes(app);
+
   // Notion Databases routes
   app.get("/api/databases", async (req, res) => {
     try {
