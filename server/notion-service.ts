@@ -1,6 +1,22 @@
+/**
+ * Notion API Service
+ * 
+ * This module provides a wrapper around the Notion API client with:
+ * - Scope-based permission checking
+ * - Common operations for databases and pages
+ * - Error handling for API calls
+ * 
+ * Usage:
+ *   const service = new NotionService(accessToken);
+ *   const databases = await service.getDatabases();
+ */
 
 import { Client } from "@notionhq/client";
 
+/**
+ * Notion OAuth scopes that can be requested
+ * Each scope grants specific permissions to the integration
+ */
 export interface NotionScopes {
   userRead: boolean;
   userWrite: boolean;
@@ -10,6 +26,10 @@ export interface NotionScopes {
   workspaceWrite: boolean;
 }
 
+/**
+ * Service class for interacting with the Notion API
+ * Handles authentication, scope management, and common operations
+ */
 export class NotionService {
   private client: Client | null = null;
   private scopes: NotionScopes = {
@@ -21,12 +41,21 @@ export class NotionService {
     workspaceWrite: false,
   };
 
+  /**
+   * Create a new NotionService instance
+   * @param accessToken - Optional Notion access token for immediate initialization
+   */
   constructor(accessToken?: string) {
     if (accessToken) {
       this.client = new Client({ auth: accessToken });
     }
   }
 
+  /**
+   * Set the access token and update permissions scopes
+   * @param token - Notion OAuth access token
+   * @param scopes - Array of scope strings (e.g., ["user:read", "content:read"])
+   */
   setAccessToken(token: string, scopes?: string[]) {
     this.client = new Client({ auth: token });
     
