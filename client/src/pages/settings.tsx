@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Settings as SettingsIcon, Save, Key, Database, Sync } from "lucide-react";
+import { Settings as SettingsIcon, Save, Key, Database, RefreshCw } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 
@@ -121,7 +121,7 @@ export default function Settings() {
           <Card>
             <CardHeader>
               <div className="flex items-center gap-2">
-                <Sync className="h-5 w-5 text-green-500" />
+                <RefreshCw className="h-5 w-5 text-green-500" />
                 <CardTitle>Sync Settings</CardTitle>
               </div>
               <CardDescription>
