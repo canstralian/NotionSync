@@ -1,4 +1,4 @@
-import { FolderSync } from "lucide-react";
+import { FolderSync, Settings } from "lucide-react";
 import SyncStatusDashboard from "../components/sync-status-dashboard";
 import NotionConnectionPanel from "../components/notion-connection-panel";
 import DataPreview from "../components/data-preview";

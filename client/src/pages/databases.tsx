@@ -2,7 +2,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Database, Plus, Settings, Sync } from "lucide-react";
+import { Database, Plus, Settings, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 export default function Databases() {
@@ -62,7 +62,7 @@ export default function Databases() {
                       <Settings className="h-4 w-4" />
                     </Button>
                     <Button size="sm">
-                      <Sync className="h-4 w-4 mr-2" />
+                      <RefreshCw className="h-4 w-4 mr-2" />
                       Sync Now
                     </Button>
                   </div>

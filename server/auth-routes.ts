@@ -1,4 +1,4 @@
-
+import "./types";
 import type { Express } from "express";
 
 const NOTION_CLIENT_ID = process.env.NOTION_CLIENT_ID;

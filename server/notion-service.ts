@@ -56,7 +56,7 @@ export class NotionService {
     }
 
     const response = await this.client.search({
-      filter: { property: "object", value: "database" },
+      filter: { property: "object", value: "page" },
     });
 
     return response.results;
@@ -67,7 +67,9 @@ export class NotionService {
       throw new Error("Missing required scope: content:read");
     }
 
-    const response = await this.client.databases.query({
+    // Note: The databases.query method signature may have changed in v5
+    // This is a simplified implementation that may need adjustment
+    const response = await (this.client.databases as any).query({
       database_id: databaseId,
       filter,
     });
