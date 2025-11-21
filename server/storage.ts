@@ -1,3 +1,16 @@
+/**
+ * Storage Layer for NotionSync Application
+ * 
+ * This module provides a storage abstraction layer for persisting application data.
+ * It defines interfaces and implementations for data access operations.
+ * 
+ * Currently implements:
+ * - MemStorage: In-memory storage for development/testing
+ * 
+ * Future implementations may include:
+ * - PostgresStorage: Production database storage using Drizzle ORM
+ */
+
 import { 
   type NotionDatabase, 
   type InsertNotionDatabase,
@@ -10,6 +23,10 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
+/**
+ * Storage interface defining all data access operations
+ * Implementations must provide these methods for database operations
+ */
 export interface IStorage {
   // Notion Databases
   getNotionDatabases(): Promise<NotionDatabase[]>;
@@ -34,6 +51,15 @@ export interface IStorage {
   updateSyncSettings(settings: Partial<SyncSettings>): Promise<SyncSettings>;
 }
 
+/**
+ * In-Memory Storage Implementation
+ * 
+ * This is a simple in-memory storage implementation used for development and testing.
+ * Data is stored in memory and will be lost when the server restarts.
+ * 
+ * For production use, replace this with a persistent storage implementation
+ * using Drizzle ORM and PostgreSQL.
+ */
 export class MemStorage implements IStorage {
   private notionDatabases: Map<string, NotionDatabase>;
   private syncOperations: Map<string, SyncOperation>;
