@@ -11,6 +11,7 @@ A full-stack web application for synchronizing Notion databases with local data 
 
 [![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
 [![Join Discussions](https://img.shields.io/badge/GitHub-Discussions-blue?style=for-the-badge)](../../discussions)
+[![Replit](https://img.shields.io/badge/Replit-Run%20Online-667881?style=for-the-badge&logo=replit&logoColor=white)](https://replit.com/@YOUR_USERNAME/YOUR_PROJECT)
 
 ## 🌟 Features
 
