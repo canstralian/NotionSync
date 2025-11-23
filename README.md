@@ -2,9 +2,15 @@
 
 A full-stack web application for synchronizing Notion databases with local data storage. This application provides real-time monitoring, management, and bidirectional synchronization of Notion workspaces.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.6.3-blue)
-![Node](https://img.shields.io/badge/Node-%3E%3D18-green)
+[![GitHub Stars](https://img.shields.io/github/stars/canstralian/NotionSync?style=for-the-badge)](https://github.com/canstralian/NotionSync/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/canstralian/NotionSync?style=for-the-badge)](https://github.com/canstralian/NotionSync/forks)
+[![Issues](https://img.shields.io/github/issues/canstralian/NotionSync?style=for-the-badge)](https://github.com/canstralian/NotionSync/issues)
+[![Pull Requests](https://img.shields.io/github/issues-pr/canstralian/NotionSync?style=for-the-badge)](https://github.com/canstralian/NotionSync/pulls)
+[![License](https://img.shields.io/github/license/canstralian/NotionSync?style=for-the-badge)](LICENSE)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/canstralian/NotionSync/ci.yml?style=for-the-badge&label=CI)](../../actions)
+
+[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen?style=for-the-badge)](CONTRIBUTING.md)
+[![Join Discussions](https://img.shields.io/badge/GitHub-Discussions-blue?style=for-the-badge)](../../discussions)
 
 ## 🌟 Features
 
