@@ -89,7 +89,15 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
+  // Add rate limiting middleware to protect the expensive file system access
+  const staticLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  app.use("*", staticLimiter, (_req, res) => {
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
