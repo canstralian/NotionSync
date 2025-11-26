@@ -1,15 +1,69 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { insertNotionDatabaseSchema, insertSyncOperationSchema, insertDataChangeSchema } from "@shared/schema";
 import { registerAuthRoutes } from "./auth-routes";
+
+// CWE-400: Uncontrolled Resource Consumption
+// CWE-770: Allocation of Resources Without Limits or Throttling
+// General API rate limiter for read operations
+const apiReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 read requests per window
+  message: "Too many requests from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter rate limiter for write operations
+const apiWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // Limit each IP to 50 write requests per window
+  message: "Too many write requests from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Very strict rate limiter for resource-intensive operations
+const syncOperationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 sync operations per window
+  message: "Too many sync operations from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// CWE-770: Maximum allowed values for query parameters
+const MAX_QUERY_LIMIT = 1000; // Maximum records that can be requested at once
+const DEFAULT_QUERY_LIMIT = 100; // Default limit if not specified
+
+// CWE-770: Timeout for async operations (30 seconds)
+const ASYNC_OPERATION_TIMEOUT = 30000;
+
+// Helper function to validate and bound query parameters
+function validateQueryLimit(limit: any): number {
+  if (!limit) {
+    return DEFAULT_QUERY_LIMIT;
+  }
+
+  const parsed = parseInt(limit as string, 10);
+
+  // Validate the parsed value
+  if (isNaN(parsed) || parsed < 1) {
+    return DEFAULT_QUERY_LIMIT;
+  }
+
+  // Apply maximum bound
+  return Math.min(parsed, MAX_QUERY_LIMIT);
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Register authentication routes
   registerAuthRoutes(app);
 
   // Notion Databases routes
-  app.get("/api/databases", async (req, res) => {
+  app.get("/api/databases", apiReadLimiter, async (req, res) => {
     try {
       const databases = await storage.getNotionDatabases();
       res.json(databases);
@@ -18,7 +72,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/databases/:id", async (req, res) => {
+  app.get("/api/databases/:id", apiReadLimiter, async (req, res) => {
     try {
       const database = await storage.getNotionDatabase(req.params.id);
       if (!database) {
@@ -30,7 +84,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/databases", async (req, res) => {
+  app.post("/api/databases", apiWriteLimiter, async (req, res) => {
     try {
       const validatedData = insertNotionDatabaseSchema.parse(req.body);
       const database = await storage.createNotionDatabase(validatedData);
@@ -40,7 +94,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/databases/:id", async (req, res) => {
+  app.patch("/api/databases/:id", apiWriteLimiter, async (req, res) => {
     try {
       const database = await storage.updateNotionDatabase(req.params.id, req.body);
       if (!database) {
@@ -52,7 +106,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/databases/:id", async (req, res) => {
+  app.delete("/api/databases/:id", apiWriteLimiter, async (req, res) => {
     try {
       const deleted = await storage.deleteNotionDatabase(req.params.id);
       if (!deleted) {
@@ -65,7 +119,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Sync Operations routes
-  app.get("/api/sync-operations", async (req, res) => {
+  app.get("/api/sync-operations", apiReadLimiter, async (req, res) => {
     try {
       const operations = await storage.getSyncOperations();
       res.json(operations);
@@ -74,7 +128,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/sync-operations", async (req, res) => {
+  app.post("/api/sync-operations", apiWriteLimiter, async (req, res) => {
     try {
       const validatedData = insertSyncOperationSchema.parse(req.body);
       const operation = await storage.createSyncOperation(validatedData);
@@ -84,7 +138,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/sync-operations/:id", async (req, res) => {
+  app.patch("/api/sync-operations/:id", apiWriteLimiter, async (req, res) => {
     try {
       const operation = await storage.updateSyncOperation(req.params.id, req.body);
       if (!operation) {
@@ -97,9 +151,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Data Changes routes
-  app.get("/api/data-changes", async (req, res) => {
+  app.get("/api/data-changes", apiReadLimiter, async (req, res) => {
     try {
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+      // CWE-770: Validate and bound query parameters
+      const limit = validateQueryLimit(req.query.limit);
       const changes = await storage.getDataChanges(limit);
       res.json(changes);
     } catch (error) {
@@ -107,7 +162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/data-changes/database/:databaseId", async (req, res) => {
+  app.get("/api/data-changes/database/:databaseId", apiReadLimiter, async (req, res) => {
     try {
       const changes = await storage.getDataChangesByDatabase(req.params.databaseId);
       res.json(changes);
@@ -116,7 +171,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/data-changes", async (req, res) => {
+  app.post("/api/data-changes", apiWriteLimiter, async (req, res) => {
     try {
       const validatedData = insertDataChangeSchema.parse(req.body);
       const change = await storage.createDataChange(validatedData);
@@ -127,7 +182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Sync Settings routes
-  app.get("/api/sync-settings", async (req, res) => {
+  app.get("/api/sync-settings", apiReadLimiter, async (req, res) => {
     try {
       const settings = await storage.getSyncSettings();
       res.json(settings);
@@ -136,7 +191,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/sync-settings", async (req, res) => {
+  app.patch("/api/sync-settings", apiWriteLimiter, async (req, res) => {
     try {
       const settings = await storage.updateSyncSettings(req.body);
       res.json(settings);
@@ -146,7 +201,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Sync Actions
-  app.post("/api/sync/now", async (req, res) => {
+  app.post("/api/sync/now", syncOperationLimiter, async (req, res) => {
     try {
       const { databaseId, operation = "sync" } = req.body;
       
@@ -160,14 +215,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         errorMessage: null,
       });
 
+      // CWE-770: Implement timeout management for async operations
       // Simulate sync process (in real app, this would be actual sync)
-      setTimeout(async () => {
-        await storage.updateSyncOperation(syncOp.id, {
-          status: "completed",
-          recordsProcessed: 100,
-          endTime: new Date(),
-        });
+      const timeoutId = setTimeout(async () => {
+        try {
+          await storage.updateSyncOperation(syncOp.id, {
+            status: "completed",
+            recordsProcessed: 100,
+            endTime: new Date(),
+          });
+        } catch (error) {
+          console.error("Failed to update sync operation:", error);
+          // Attempt to mark as failed
+          try {
+            await storage.updateSyncOperation(syncOp.id, {
+              status: "failed",
+              errorMessage: "Sync operation failed",
+              endTime: new Date(),
+            });
+          } catch (updateError) {
+            console.error("Failed to mark sync operation as failed:", updateError);
+          }
+        }
       }, 2000);
+
+      // Set a maximum timeout to prevent resource leaks
+      const maxTimeout = setTimeout(async () => {
+        clearTimeout(timeoutId);
+        try {
+          const currentOp = await storage.getSyncOperations();
+          const op = currentOp.find(o => o.id === syncOp.id);
+          if (op && op.status === "running") {
+            await storage.updateSyncOperation(syncOp.id, {
+              status: "failed",
+              errorMessage: "Sync operation timed out",
+              endTime: new Date(),
+            });
+          }
+        } catch (error) {
+          console.error("Failed to handle sync timeout:", error);
+        }
+      }, ASYNC_OPERATION_TIMEOUT);
+
+      // Clean up the max timeout when operation completes normally
+      setTimeout(() => clearTimeout(maxTimeout), 2500);
 
       res.json(syncOp);
     } catch (error) {
@@ -175,7 +266,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/stats", async (req, res) => {
+  app.get("/api/stats", apiReadLimiter, async (req, res) => {
     try {
       const databases = await storage.getNotionDatabases();
       const changes = await storage.getDataChanges();

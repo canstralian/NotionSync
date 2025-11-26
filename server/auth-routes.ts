@@ -1,13 +1,45 @@
 import "./types";
 import type { Express } from "express";
+import rateLimit from "express-rate-limit";
 
 const NOTION_CLIENT_ID = process.env.NOTION_CLIENT_ID;
 const NOTION_CLIENT_SECRET = process.env.NOTION_CLIENT_SECRET;
 const NOTION_REDIRECT_URI = process.env.NOTION_REDIRECT_URI || "http://0.0.0.0:5000/auth/notion/callback";
 
+// CWE-307: Improper Restriction of Excessive Authentication Attempts
+// Rate limiter for authentication endpoints - stricter limits
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 authentication attempts per window
+  message: "Too many authentication attempts from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip successful requests from counting
+  skipSuccessfulRequests: false,
+  skipFailedRequests: false,
+});
+
+// Rate limiter for OAuth callback - prevent code replay attacks
+const callbackRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 callback attempts per window
+  message: "Too many callback attempts from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// General auth API rate limiter
+const authApiRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  message: "Too many requests from this IP, please try again after 15 minutes",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export function registerAuthRoutes(app: Express) {
   // Initiate Notion OAuth flow
-  app.get("/auth/notion", (req, res) => {
+  app.get("/auth/notion", authRateLimiter, (req, res) => {
     const scopes = [
       "user:read",
       "content:read",
@@ -21,7 +53,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   // Handle Notion OAuth callback
-  app.get("/auth/notion/callback", async (req, res) => {
+  app.get("/auth/notion/callback", callbackRateLimiter, async (req, res) => {
     const { code } = req.query;
 
     if (!code) {
@@ -61,7 +93,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   // Get current authentication status
-  app.get("/api/auth/status", (req, res) => {
+  app.get("/api/auth/status", authApiRateLimiter, (req, res) => {
     res.json({
       isAuthenticated: !!req.session.notionAccessToken,
       workspaceId: req.session.notionWorkspaceId,
@@ -69,7 +101,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   // Disconnect Notion
-  app.post("/api/auth/disconnect", (req, res) => {
+  app.post("/api/auth/disconnect", authApiRateLimiter, (req, res) => {
     delete req.session.notionAccessToken;
     delete req.session.notionWorkspaceId;
     delete req.session.notionBotId;
