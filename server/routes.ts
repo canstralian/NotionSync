@@ -1,11 +1,24 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import rateLimit from "express-rate-limit";
 import { storage } from "./storage";
 import { insertNotionDatabaseSchema, insertSyncOperationSchema, insertDataChangeSchema } from "@shared/schema";
 import { registerAuthRoutes } from "./auth-routes";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Register authentication routes
+  // General API rate limiter - prevents resource exhaustion (CWE-400, CWE-770)
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per 15 minutes
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { message: "Too many requests, please try again later." },
+  });
+
+  // Apply rate limiting to all API routes
+  app.use("/api", apiLimiter);
+
+  // Register authentication routes with their own stricter rate limiting
   registerAuthRoutes(app);
 
   // Notion Databases routes
