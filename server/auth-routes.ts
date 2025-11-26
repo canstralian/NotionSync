@@ -1,13 +1,33 @@
 import "./types";
 import type { Express } from "express";
+import rateLimit from "express-rate-limit";
 
 const NOTION_CLIENT_ID = process.env.NOTION_CLIENT_ID;
 const NOTION_CLIENT_SECRET = process.env.NOTION_CLIENT_SECRET;
 const NOTION_REDIRECT_URI = process.env.NOTION_REDIRECT_URI || "http://0.0.0.0:5000/auth/notion/callback";
 
 export function registerAuthRoutes(app: Express) {
+  // Strict rate limiter for authentication endpoints to prevent brute force (CWE-307)
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // limit each IP to 5 authentication attempts per 15 minutes
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many authentication attempts, please try again later." },
+    skipSuccessfulRequests: true, // Don't count successful requests
+  });
+
+  // Rate limiter for OAuth callback to prevent token exchange abuse
+  const callbackLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // limit each IP to 10 callback attempts per 15 minutes
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many callback attempts, please try again later." },
+  });
+
   // Initiate Notion OAuth flow
-  app.get("/auth/notion", (req, res) => {
+  app.get("/auth/notion", authLimiter, (req, res) => {
     const scopes = [
       "user:read",
       "content:read",
@@ -21,7 +41,7 @@ export function registerAuthRoutes(app: Express) {
   });
 
   // Handle Notion OAuth callback
-  app.get("/auth/notion/callback", async (req, res) => {
+  app.get("/auth/notion/callback", callbackLimiter, async (req, res) => {
     const { code } = req.query;
 
     if (!code) {
